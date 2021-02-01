@@ -23,33 +23,6 @@ jobs:
             reproman_tests_deps: full
             reproman_tests_ssh: 1
             setup_slurm: 1
-          # TODO: Figure out how to use --system-site-packages.
-          - python: 3.6
-            reproman_tests_assume_ssp: 1
-            reproman_tests_deps: core
-            reproman_tests_ssh: 1
-          - python: 3.6
-            reproman_tests_assume_ssp: 1
-            reproman_tests_deps: core
-            reproman_tests_ssh: 1
-          - python: 3.6
-            # By default no logs will be output. This one is to test
-            # with log output at INFO level
-            reproman_loglevel: INFO
-            reproman_tests_deps: full-except-datalad
-          - python: 3.6
-            # By default no logs will be output. This one is to test
-            # with low level but dumped to /dev/null
-            reproman_loglevel: 2
-            reproman_logtarget: /dev/null
-            reproman_tests_deps: full-except-datalad
-          - python: 3.7
-            # must operate nicely with those env variables set
-            set_http_proxy: true
-            reproman_tests_deps: full-except-datalad
-            reproman_tests_nonetwork: 1
-          - python: 3.8
-            reproman_tests_deps: full-except-datalad
     steps:
       - uses: actions/checkout@v2
       - name: Set up Python ${{ matrix.python }}
