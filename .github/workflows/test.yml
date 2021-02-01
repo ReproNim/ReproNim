@@ -1,0 +1,124 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      NO_ET: 1
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - python: 3.6
+            install_condor: 1
+            install_datalad: 1
+            reproman_tests_deps: full
+            reproman_tests_ssh: 1
+            setup_slurm: 1
+          # TODO: Figure out how to use --system-site-packages.
+          - python: 3.6
+            reproman_tests_assume_ssp: 1
+            reproman_tests_deps: core
+            reproman_tests_ssh: 1
+          - python: 3.6
+            reproman_tests_assume_ssp: 1
+            reproman_tests_deps: core
+            reproman_tests_ssh: 1
+          - python: 3.6
+            # By default no logs will be output. This one is to test
+            # with log output at INFO level
+            reproman_loglevel: INFO
+            reproman_tests_deps: full-except-datalad
+          - python: 3.6
+            # By default no logs will be output. This one is to test
+            # with low level but dumped to /dev/null
+            reproman_loglevel: 2
+            reproman_logtarget: /dev/null
+            reproman_tests_deps: full-except-datalad
+          - python: 3.7
+            # must operate nicely with those env variables set
+            set_http_proxy: true
+            reproman_tests_deps: full-except-datalad
+            reproman_tests_nonetwork: 1
+          - python: 3.8
+            reproman_tests_deps: full-except-datalad
+    steps:
+      - uses: actions/checkout@v2
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Set up system
+        run: |
+          # we do not need anything from those APT sources, and they
+          # often fail, disable!
+          sudo sed -i -e '/mongodb/d' /etc/apt/sources.list /etc/apt/sources.list.d/*list
+          # The ultimate one-liner setup for NeuroDebian repository
+          bash <(wget -q -O- http://neuro.debian.net/_files/neurodebian-travis.sh)
+          sudo apt-get update -qq
+          sudo apt-get install eatmydata
+          # So we could test under sudo -E with PATH pointing to
+          # installed location
+          sudo sed -i -e 's/^Defaults.*secure_path.*$//' /etc/sudoers
+          # sqlite3: for SVN tests (SVNRepoShim._ls_files_command())
+          # parallel: for concurrent jobs with local orchestrator
+          sudo eatmydata apt-get install sqlite3 parallel singularity-container
+          git config --global user.email "reproman@repronim.org"
+          git config --global user.name "ReproMan Tester"
+      - name: Set up Slurm
+        if: matrix.setup_slurm != ''
+        run: tools/ci/setup-slurm-container.sh
+      - name: Install datalad
+        if: matrix.install_datalad != ''
+        run: tools/ci/install_datalad
+      - name: Install condor
+        if: matrix.install_condor != ''
+        run: tools/ci/install_condor
+      - name: Set up test environment
+        run: |
+          if [ "${{ matrix.reproman_tests_ssh }}" != "" ]; then
+            sudo eatmydata tools/ci/prep-travis-forssh-sudo.sh
+            tools/ci/prep-travis-forssh.sh
+            echo REPROMAN_TESTS_SSH=1 >> "$GITHUB_ENV"
+          fi
+          if [ "${{ matrix.reproman_tests_nonetwork }}" != "" ]; then
+            echo REPROMAN_TESTS_NONETWORK="${{ matrix.reproman_tests_nonetwork }}" >> "$GITHUB_ENV"
+          fi
+          if [ "${{ matrix.reproman_loglevel }}" != "" ]; then
+            echo REPROMAN_LOGLEVEL="${{ matrix.reproman_loglevel }}" >> "$GITHUB_ENV"
+          fi
+          if [ "${{ matrix.reproman_logtarget }}" != "" ]; then
+            echo REPROMAN_LOGTARGET="${{ matrix.reproman_logtarget }}" >> "$GITHUB_ENV"
+          fi
+          if [ "${{ matrix.set_http_proxy }}" != "" ]; then
+            echo HTTP_PROXY="" >> "$GITHUB_ENV"
+            echo HTTPS_PROXY="" >> "$GITHUB_ENV"
+          fi
+      - name: pip install
+        run: |
+          pip install codecov
+          pip install --upgrade pip
+          # needed by html5lib
+          pip install --upgrade 'setuptools>=18.5'
+          pip install -e .["${{ matrix.reproman_tests_deps }}"]
+          # The above could have been a core dependencies install, so
+          # make sure we have the other devel dependencies we need.
+          pip install -e .[tests]
+          pip install -e .[devel-docs]
+          pip install -e .[devel-utils]
+      - name: Verify setup.py build
+        run: python setup.py build
+      - name: Run tests
+        run: coverage run `which py.test` -s -rs --integration reproman && coverage xml
+      - name: Generate documentation and run doctests
+        run: PYTHONPATH=$PWD make -C docs html doctest
+      - name: Upload coverage to codecov
+        uses: codecov/codecov-action@v1
